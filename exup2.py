@@ -9,7 +9,7 @@ Date: 2025-03-04 05:31:29
 
 Optimizes model selection from Together AI's free model offerings.
 """
-
+import traceback  # Add this to the imports at the top
 import os
 import sys
 import yaml
@@ -66,7 +66,156 @@ def find_local_models(base_dir: str = ".") -> Dict[str, List[str]]:
                     results["codellama"].append(path)
     
     return results
-
+    async def _generate_together(self, prompt: str, max_tokens: int, temperature: float, stop: List[str]) -> str:
+        """Generate text using Together AI API"""
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.api_key}"
+        }
+        
+        # Format prompt for chat completion
+        messages = [{"role": "user", "content": prompt}]
+        
+        # Check if system prompt exists in config
+        if "system_prompt" in self.model_config and self.model_config["system_prompt"]:
+            messages.insert(0, {
+                "role": "system", 
+                "content": self.model_config["system_prompt"]
+            })
+        
+        payload = {
+            "model": self.model_id,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "context_length_exceeded_behavior": "truncate",
+            "stream": False
+        }
+        
+        # Add stop sequences if provided
+        if stop:
+            payload["stop"] = stop
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                self.logger.info(f"Sending request to Together AI for model: {self.model_id}")
+                start_time = time.time()
+                
+                async with session.post(
+                    self.api_url, 
+                    headers=headers, 
+                    json=payload, 
+                    timeout=120  # Longer timeout for larger models
+                ) as response:
+                    duration = time.time() - start_time
+                    
+                    if response.status != 200:
+                        error_text = await response.text()
+                        self.logger.error(f"Together API error ({response.status}): {error_text}")
+                        raise RuntimeError(f"API error ({response.status}): {error_text}")
+                    
+                    result = await response.json()
+                    self.logger.info(f"Together AI response received in {duration:.2f}s")
+                    
+                    # Extract content from chat completion format
+                    try:
+                        return result["choices"][0]["message"]["content"]
+                    except (KeyError, IndexError) as e:
+                        self.logger.error(f"Unexpected API response format: {str(result)}")
+                        return str(result)
+                        
+            except aiohttp.ClientError as e:
+                self.logger.error(f"Together AI API connection error: {str(e)}")
+                raise
+    
+    async def _generate_together_stream(self, 
+                                       prompt: str, 
+                                       max_tokens: int, 
+                                       temperature: float, 
+                                       stop: List[str]) -> AsyncGenerator[str, None]:
+        """Stream text generation from Together AI API"""
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.api_key}"
+        }
+        
+        # Format prompt for chat completion
+        messages = [{"role": "user", "content": prompt}]
+        
+        # Check if system prompt exists in config
+        if "system_prompt" in self.model_config and self.model_config["system_prompt"]:
+            messages.insert(0, {
+                "role": "system", 
+                "content": self.model_config["system_prompt"]
+            })
+        
+        payload = {
+            "model": self.model_id,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "context_length_exceeded_behavior": "truncate",
+            "stream": True  # Enable streaming
+        }
+        
+        # Add stop sequences if provided
+        if stop:
+            payload["stop"] = stop
+        
+        try:
+            self.logger.info(f"Starting Together AI stream with model: {self.model_id}")
+            
+            # Handle the stream manually with proper parsing
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.api_url, 
+                    headers=headers, 
+                    json=payload, 
+                    timeout=300  # Long timeout for streaming
+                ) as response:
+                    
+                    if response.status != 200:
+                        error_text = await response.text()
+                        self.logger.error(f"Together API error ({response.status}): {error_text}")
+                        yield f"API error ({response.status}): {error_text}"
+                        return
+                    
+                    # Process streaming response
+                    async for line in response.content:
+                        line = line.decode('utf-8').strip()
+                        if line:
+                            # Skip "data: " prefix if present
+                            if line.startswith("data: "):
+                                line = line[6:]  # Remove "data: " prefix
+                                
+                            # Skip empty lines and "[DONE]"
+                            if line == "[DONE]":
+                                continue
+                                
+                            try:
+                                data = json.loads(line)
+                                # Extract token text from chat completion format
+                                if "choices" in data and len(data["choices"]) > 0:
+                                    choice = data["choices"][0]
+                                    if ("delta" in choice and 
+                                        "content" in choice["delta"] and 
+                                        choice["delta"]["content"]):
+                                        yield choice["delta"]["content"]
+                            except json.JSONDecodeError:
+                                self.logger.warning(f"Failed to parse streaming response line: {line}")
+                            except Exception as e:
+                                self.logger.error(f"Error processing streaming response: {str(e)}")
+                                
+        except aiohttp.ClientError as e:
+            self.logger.error(f"Together AI API connection error: {str(e)}")
+            yield f"Connection error: {str(e)}"
+        except Exception as e:
+            self.logger.error(f"Unexpected error in streaming: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            yield f"Error: {str(e)}"
+            
 def test_together_connection(api_key: str) -> Tuple[bool, str]:
     """Test connection to Together AI API with free models"""
     try:
