@@ -707,7 +707,7 @@ class EnhancedModelSystem:
         
         self.logger.info("Enhanced Model System initialized")
     
-        def _setup_logger(self) -> logging.Logger:
+    def _setup_logger(self) -> logging.Logger:
         """Set up logging"""
         logger = logging.getLogger("enhanced_model_system")
         logger.setLevel(logging.INFO)
