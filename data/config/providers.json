@@ -1,0 +1,23 @@
+{
+  "together": {
+    "api_url": "https://api.together.xyz/v1",
+    "models": [
+      "mistralai/mistral-7b-instruct",
+      "mistralai/mixtral-8x7b-instruct",
+      "meta-llama/codellama-34b-instruct"
+    ]
+  },
+  "groq": {
+    "api_url": "https://api.groq.com/openai/v1",
+    "models": [
+      "llama2-70b-4096",
+      "mixtral-8x7b-32768"
+    ]
+  },
+  "huggingface": {
+    "api_url": "https://api-inference.huggingface.co/models",
+    "models": [
+      "mistralai/mistral-7b-instruct"
+    ]
+  }
+}
