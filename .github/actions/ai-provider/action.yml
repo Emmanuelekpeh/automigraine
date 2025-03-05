@@ -1,0 +1,141 @@
+name: 'AI Provider'
+description: 'Reusable action to interact with AI model providers'
+inputs:
+  provider:
+    description: 'AI provider to use (together, groq, huggingface, etc.)'
+    required: true
+    default: 'together'
+  model:
+    description: 'Model ID to use'
+    required: true
+  prompt:
+    description: 'Prompt to send to the model'
+    required: true
+  max-tokens:
+    description: 'Maximum tokens to generate'
+    required: false
+    default: '1024'
+  temperature:
+    description: 'Temperature for generation'
+    required: false
+    default: '0.7'
+  api-key-secret:
+    description: 'Secret name containing the API key'
+    required: true
+
+outputs:
+  response:
+    description: 'Response from the AI model'
+    value: ${{ steps.generate.outputs.response }}
+  error:
+    description: 'Error message if any'
+    value: ${{ steps.generate.outputs.error }}
+  tokens:
+    description: 'Number of tokens used'
+    value: ${{ steps.generate.outputs.tokens }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check API Key
+      shell: bash
+      run: |
+        if [[ -z "${{ inputs.api-key-secret }}" ]]; then
+          echo "::error::API key secret name is required"
+          exit 1
+        fi
+
+    - name: Generate with AI
+      id: generate
+      shell: python
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        MODEL: ${{ inputs.model }}
+        PROMPT: ${{ inputs.prompt }}
+        MAX_TOKENS: ${{ inputs.max-tokens }}
+        TEMPERATURE: ${{ inputs.temperature }}
+        API_KEY: ${{ secrets[inputs.api-key-secret] }}
+      run: |
+        import os
+        import json
+        import requests
+        import sys
+        from pathlib import Path
+
+        # Store response and error output files
+        output_dir = Path("./.github/outputs")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        provider = os.environ["PROVIDER"]
+        model = os.environ["MODEL"]
+        prompt = os.environ["PROMPT"]
+        max_tokens = int(os.environ["MAX_TOKENS"])
+        temperature = float(os.environ["TEMPERATURE"])
+        api_key = os.environ["API_KEY"]
+        
+        try:
+            response_text = ""
+            tokens_used = 0
+            
+            if provider == "together":
+                resp = requests.post(
+                    "https://api.together.xyz/v1/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": model,
+                        "prompt": prompt,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature
+                    }
+                )
+                data = resp.json()
+                response_text = data["choices"][0]["text"]
+                tokens_used = data.get("usage", {}).get("total_tokens", 0)
+                
+            elif provider == "groq":
+                resp = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": max_tokens,
+                        "temperature": temperature
+                    }
+                )
+                data = resp.json()
+                response_text = data["choices"][0]["message"]["content"]
+                tokens_used = data.get("usage", {}).get("total_tokens", 0)
+                
+            elif provider == "huggingface":
+                resp = requests.post(
+                    f"https://api-inference.huggingface.co/models/{model}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={"inputs": prompt}
+                )
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    response_text = data[0].get("generated_text", "")
+                elif isinstance(data, dict):
+                    response_text = data.get("generated_text", "")
+                
+            # Save output and set action outputs
+            with open(output_dir / "response.txt", "w") as f:
+                f.write(response_text)
+                
+            # Set GitHub Actions outputs
+            with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                f.write(f"response<<EOF\n{response_text}\nEOF\n")
+                f.write(f"tokens={tokens_used}\n")
+                f.write(f"error=\n")
+                
+        except Exception as e:
+            error_msg = str(e)
+            with open(output_dir / "error.txt", "w") as f:
+                f.write(error_msg)
+                
+            # Set GitHub Actions error output
+            with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                f.write(f"error<<EOF\n{error_msg}\nEOF\n")
+                f.write(f"response=\n")
+                f.write(f"tokens=0\n")
