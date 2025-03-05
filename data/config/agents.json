@@ -1,0 +1,22 @@
+{
+  "manager": {
+    "provider": "together",
+    "model_id": "mistralai/mistral-7b-instruct",
+    "system_prompt": "You are a task manager responsible for planning and coordinating work."
+  },
+  "developer1": {
+    "provider": "groq",
+    "model_id": "llama2-70b-4096",
+    "system_prompt": "You are a skilled developer who implements solutions."
+  },
+  "developer2": {
+    "provider": "together",
+    "model_id": "mistralai/mixtral-8x7b-instruct",
+    "system_prompt": "You are a developer who enhances and reviews code."
+  },
+  "moderator": {
+    "provider": "huggingface",
+    "model_id": "mistralai/mistral-7b-instruct",
+    "system_prompt": "You are a moderator responsible for evaluating and integrating solutions."
+  }
+}
